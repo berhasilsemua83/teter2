@@ -23,9 +23,14 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": ["icons/icon.ico", "icons/icon.png"]
-  },
+  "active": true,
+  "targets": "all",
+  "icon": ["icons/icon.ico", "icons/icon.png"],
+  "windows": {
+    "nsis": {
+      "installerIcon": "icons/icon.ico"
+    }
+  }
+},
   "plugins": {}
 }
