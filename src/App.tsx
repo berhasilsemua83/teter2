@@ -25,6 +25,9 @@ interface AppConfig {
   node_exe_path: string;
   project_folder: string;
   schedule: ScheduleConfig;
+  ai_style_preset: string;
+  ai_max_sentences: number;
+  ai_custom_instruction: string;
 }
 
 const EMPTY_CONFIG: AppConfig = {
@@ -44,7 +47,17 @@ const EMPTY_CONFIG: AppConfig = {
     refresh_token_day: "MON",
     refresh_token_time: "03:00",
   },
+  ai_style_preset: "ramah_sopan",
+  ai_max_sentences: 2,
+  ai_custom_instruction: "",
 };
+
+const STYLE_PRESET_OPTIONS = [
+  { value: "ramah_sopan", label: "Ramah & Sopan (formal ringan)" },
+  { value: "santai_gaul", label: "Santai & Akrab" },
+  { value: "lucu_receh", label: "Lucu & Receh" },
+  { value: "custom", label: "Custom (tulis sendiri)" },
+];
 
 const HARI_OPTIONS = [
   { value: "MON", label: "Senin" },
@@ -128,15 +141,9 @@ export default function App() {
   }
 
   async function pickFolder(target: "queue_folder" | "posted_folder" | "project_folder") {
-    try {
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === "string") {
-        setConfig((prev) => ({ ...prev, [target]: selected }));
-      } else {
-        setStatus("Tidak ada folder dipilih.");
-      }
-    } catch (err) {
-      setStatus(`Gagal membuka dialog folder: ${err}`);
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") {
+      setConfig((prev) => ({ ...prev, [target]: selected }));
     }
   }
 
@@ -193,7 +200,7 @@ export default function App() {
   if (loading) return <div className="container">Memuat pengaturan...</div>;
 
   return (
-        <div className="container">
+    <div className="container">
       <div className="header-row">
         <h1>Threads Automator</h1>
         <div className="status-indicator">
@@ -331,6 +338,55 @@ export default function App() {
               : "NONAKTIF — komentar tidak akan dibalas otomatis"}
           </span>
         </label>
+
+        {config.ai_reply_enabled && (
+          <>
+            <label className="field-label" style={{ marginTop: 16 }}>
+              Gaya Bahasa Balasan
+              <span className="hint">Pilih template siap pakai, atau tulis sendiri</span>
+            </label>
+            <select
+              value={config.ai_style_preset}
+              onChange={(e) => setConfig({ ...config, ai_style_preset: e.target.value })}
+            >
+              {STYLE_PRESET_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+
+            <label className="field-label">
+              Panjang Balasan (maksimal jumlah kalimat)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={config.ai_max_sentences}
+              onChange={(e) => setConfig({ ...config, ai_max_sentences: Number(e.target.value) })}
+            />
+
+            <label className="field-label">
+              {config.ai_style_preset === "custom"
+                ? "Instruksi Gaya Bahasa (wajib diisi karena pilih Custom)"
+                : "Aturan Tambahan (opsional)"}
+              <span className="hint">
+                {config.ai_style_preset === "custom"
+                  ? "Tulis bebas gaya bahasa yang kamu mau, contoh: \"Gunakan bahasa Jawa halus, sedikit humor\""
+                  : "Ditambahkan sebagai aturan ekstra di atas template yang dipilih"}
+              </span>
+            </label>
+            <textarea
+              rows={3}
+              placeholder={
+                config.ai_style_preset === "custom"
+                  ? "Contoh: Gaya bahasa hangat seperti kakak online shop, selalu sebut 'kak' di awal kalimat..."
+                  : "Contoh: selalu sebut nama brand di akhir kalimat"
+              }
+              value={config.ai_custom_instruction}
+              onChange={(e) => setConfig({ ...config, ai_custom_instruction: e.target.value })}
+            />
+          </>
+        )}
       </section>
 
       {/* ===== FOLDER KONTEN ===== */}
