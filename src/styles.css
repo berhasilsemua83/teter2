@@ -5,7 +5,6 @@
   --card-bg: #1e1727;
   --card-border: #3a2a4d;
   --accent-purple: #a855f7;
-  --accent-red: #ef4444;
   --gradient-main: linear-gradient(135deg, #7c3aed 0%, #a855f7 40%, #dc2626 100%);
   --text-dim: #9d94ad;
 }
@@ -132,7 +131,8 @@ input[type="text"],
 input[type="password"],
 input[type="number"],
 input[type="time"],
-select {
+select,
+textarea {
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--card-border);
@@ -142,9 +142,14 @@ select {
   color: #f1f0f5;
   outline: none;
   transition: border-color 0.15s;
+  font-family: inherit;
 }
 
-input:focus, select:focus {
+textarea {
+  resize: vertical;
+}
+
+input:focus, select:focus, textarea:focus {
   border-color: var(--accent-purple);
 }
 
