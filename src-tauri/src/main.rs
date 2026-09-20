@@ -11,6 +11,16 @@ use std::fs;
 use std::process::Command;
 use tauri::Manager;
 
+// ====== SCRIPT DIEMBED LANGSUNG KE DALAM APLIKASI ======
+// Supaya bisa "auto-setup" di RDP/PC baru tanpa perlu copy file manual.
+const SCRIPT_THREAD_POSTER: &str = include_str!("../scripts/thread-poster.js");
+const SCRIPT_REPLY_CHECKER: &str = include_str!("../scripts/reply-checker.js");
+const SCRIPT_COMMENT_RESPONDER: &str = include_str!("../scripts/comment-responder.js");
+const SCRIPT_REFRESH_TOKEN: &str = include_str!("../scripts/refresh-token.js");
+const SCRIPT_REPLY_MANUAL: &str = include_str!("../scripts/reply-manual.js");
+const SCRIPT_TRIGGER_RULES: &str = include_str!("../scripts/trigger-rules.json");
+const SCRIPT_PACKAGE_JSON: &str = include_str!("../scripts/package.json");
+
 // ====== STRUKTUR DATA CONFIG ======
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -94,13 +104,15 @@ fn sync_env_file(config: &AppConfig) -> Result<(), String> {
     let gemini_keys_joined = config.gemini_api_keys.join(",");
 
     let content = format!(
-        "THREADS_USER_ID={}\nTHREADS_ACCESS_TOKEN={}\nCLOUDINARY_CLOUD_NAME={}\nCLOUDINARY_API_KEY={}\nCLOUDINARY_API_SECRET={}\nGEMINI_API_KEYS={}\n",
+        "THREADS_USER_ID={}\nTHREADS_ACCESS_TOKEN={}\nCLOUDINARY_CLOUD_NAME={}\nCLOUDINARY_API_KEY={}\nCLOUDINARY_API_SECRET={}\nGEMINI_API_KEYS={}\nQUEUE_FOLDER={}\nPOSTED_FOLDER={}\n",
         config.threads_user_id,
         config.threads_access_token,
         config.cloudinary.cloud_name,
         config.cloudinary.api_key,
         config.cloudinary.api_secret,
         gemini_keys_joined,
+        config.queue_folder,
+        config.posted_folder,
     );
 
     let env_path = format!("{}\\.env", config.project_folder.trim_end_matches('\\'));
@@ -295,6 +307,131 @@ fn apply_schedule(app: tauri::AppHandle, config: AppConfig) -> Result<Vec<String
     Ok(log)
 }
 
+// Menulis satu file embedded ke folder proyek, HANYA kalau belum ada
+// (biar tidak menimpa file yang sudah kamu edit sendiri, misal trigger-rules.json)
+fn write_embedded_if_missing(project: &str, filename: &str, content: &str) -> String {
+    let path = format!("{project}\\{filename}");
+    if std::path::Path::new(&path).exists() {
+        return format!("DILEWATI: {filename} sudah ada, tidak ditimpa.");
+    }
+    match fs::write(&path, content) {
+        Ok(_) => format!("OK: {filename} dibuat."),
+        Err(e) => format!("GAGAL menulis {filename}: {e}"),
+    }
+}
+
+// Menulis file embedded, SELALU ditimpa (untuk file inti yang harus selalu
+// versi terbaru, misal thread-poster.js, bukan file yang boleh dikustomisasi user)
+fn write_embedded_always(project: &str, filename: &str, content: &str) -> String {
+    let path = format!("{project}\\{filename}");
+    match fs::write(&path, content) {
+        Ok(_) => format!("OK: {filename} ditulis/diupdate."),
+        Err(e) => format!("GAGAL menulis {filename}: {e}"),
+    }
+}
+
+#[tauri::command]
+fn setup_project(app: tauri::AppHandle, config: AppConfig) -> Result<Vec<String>, String> {
+    if config.project_folder.trim().is_empty() {
+        return Err("Isi dulu Folder Proyek sebelum menjalankan Setup Otomatis.".into());
+    }
+    if config.node_exe_path.trim().is_empty() {
+        return Err("Isi dulu Path node.exe sebelum menjalankan Setup Otomatis.".into());
+    }
+
+    let project = config.project_folder.trim_end_matches('\\').to_string();
+    let mut log: Vec<String> = Vec::new();
+
+    // 1. Buat folder proyek kalau belum ada
+    if !std::path::Path::new(&project).exists() {
+        fs::create_dir_all(&project).map_err(|e| format!("Gagal membuat folder proyek: {e}"))?;
+        log.push(format!("OK: folder proyek dibuat di {project}"));
+    } else {
+        log.push("DILEWATI: folder proyek sudah ada.".into());
+    }
+
+    // 2. Tulis file inti (selalu update ke versi terbaru dari aplikasi)
+    log.push(write_embedded_always(&project, "thread-poster.js", SCRIPT_THREAD_POSTER));
+    log.push(write_embedded_always(&project, "reply-checker.js", SCRIPT_REPLY_CHECKER));
+    log.push(write_embedded_always(&project, "comment-responder.js", SCRIPT_COMMENT_RESPONDER));
+    log.push(write_embedded_always(&project, "refresh-token.js", SCRIPT_REFRESH_TOKEN));
+    log.push(write_embedded_always(&project, "reply-manual.js", SCRIPT_REPLY_MANUAL));
+
+    // 3. Tulis file yang BOLEH dikustomisasi user -> jangan ditimpa kalau sudah ada
+    log.push(write_embedded_if_missing(&project, "trigger-rules.json", SCRIPT_TRIGGER_RULES));
+    log.push(write_embedded_if_missing(&project, "package.json", SCRIPT_PACKAGE_JSON));
+
+    // 4. Buat folder queue & posted default kalau config belum menentukan folder sendiri
+    let queue_path = if config.queue_folder.trim().is_empty() {
+        format!("{project}\\queue")
+    } else {
+        config.queue_folder.clone()
+    };
+    let posted_path = if config.posted_folder.trim().is_empty() {
+        format!("{project}\\posted")
+    } else {
+        config.posted_folder.clone()
+    };
+
+    for (label, path) in [("queue", &queue_path), ("posted", &posted_path)] {
+        if !std::path::Path::new(path).exists() {
+            fs::create_dir_all(path).map_err(|e| format!("Gagal membuat folder {label}: {e}"))?;
+            log.push(format!("OK: folder {label} dibuat di {path}"));
+        } else {
+            log.push(format!("DILEWATI: folder {label} sudah ada."));
+        }
+    }
+
+    // 5. Update config supaya queue_folder/posted_folder terisi otomatis kalau tadinya kosong
+    let mut updated_config = config.clone();
+    if updated_config.queue_folder.trim().is_empty() {
+        updated_config.queue_folder = queue_path;
+    }
+    if updated_config.posted_folder.trim().is_empty() {
+        updated_config.posted_folder = posted_path;
+    }
+
+    write_config_to_disk(&app, &updated_config)?;
+    sync_env_file(&updated_config)?;
+    sync_ai_style_file(&updated_config)?;
+    log.push("OK: .env dan ai-style.json ditulis.".into());
+
+    // 6. Jalankan "npm install" di folder proyek
+    // npm.cmd biasanya ada di folder yang sama dengan node.exe
+    let node_dir = std::path::Path::new(&config.node_exe_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let npm_path = format!("{node_dir}\\npm.cmd");
+
+    log.push(format!("Menjalankan npm install di {project} (bisa beberapa menit)..."));
+
+    let npm_output = Command::new(&npm_path)
+        .arg("install")
+        .current_dir(&project)
+        .output();
+
+    match npm_output {
+        Ok(out) => {
+            if out.status.success() {
+                log.push("OK: npm install selesai.".into());
+            } else {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                log.push(format!("GAGAL: npm install -> {}", stderr.trim()));
+            }
+        }
+        Err(e) => {
+            log.push(format!(
+                "ERROR menjalankan npm install: {e}. Pastikan npm.cmd ada di {npm_path}"
+            ));
+        }
+    }
+
+    log.push("SELESAI. Folder proyek siap dipakai.".into());
+
+    Ok(log)
+}
+
 #[tauri::command]
 fn detect_node_path() -> Result<String, String> {
     let output = Command::new("where")
@@ -323,7 +460,8 @@ fn main() {
             load_config,
             save_config,
             apply_schedule,
-            detect_node_path
+            detect_node_path,
+            setup_project
         ])
         .run(tauri::generate_context!())
         .expect("Gagal menjalankan aplikasi Tauri");
