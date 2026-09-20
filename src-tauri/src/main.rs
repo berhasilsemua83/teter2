@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // main.rs
 // Backend Tauri: menyimpan config + mengatur Windows Task Scheduler
 // lewat command line "schtasks.exe" (bawaan Windows, tidak perlu library
