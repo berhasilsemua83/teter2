@@ -73,6 +73,8 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(EMPTY_CONFIG);
   const [status, setStatus] = useState<string>("");
   const [scheduleLog, setScheduleLog] = useState<string[]>([]);
+  const [setupLog, setSetupLog] = useState<string[]>([]);
+  const [settingUp, setSettingUp] = useState(false);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
 
@@ -112,6 +114,24 @@ export default function App() {
       setStatus("Pengaturan tersimpan.");
     } catch (err) {
       setStatus(`Gagal menyimpan: ${err}`);
+    }
+  }
+
+  async function handleSetupProject() {
+    setSettingUp(true);
+    setSetupLog([]);
+    setStatus("Menjalankan setup otomatis...");
+    try {
+      const log = await invoke<string[]>("setup_project", { config: cleanedConfig() });
+      setSetupLog(log);
+      setStatus("Setup selesai. Cek detail di bawah.");
+      // Muat ulang config karena setup_project bisa mengisi queue_folder/posted_folder otomatis
+      const reloaded = await invoke<AppConfig>("load_config");
+      setConfig(reloaded);
+    } catch (err) {
+      setStatus(`Gagal setup: ${err}`);
+    } finally {
+      setSettingUp(false);
     }
   }
 
@@ -431,6 +451,30 @@ export default function App() {
           <input type="text" readOnly value={config.project_folder} placeholder="Belum dipilih" />
           <button type="button" onClick={() => pickFolder("project_folder")}>Pilih Folder</button>
         </div>
+
+        <button
+          type="button"
+          className="btn-save"
+          style={{ marginTop: 14 }}
+          onClick={handleSetupProject}
+          disabled={settingUp}
+        >
+          {settingUp ? "Menyiapkan..." : "⚡ Setup Otomatis (folder + file + npm install)"}
+        </button>
+        <p className="hint" style={{ marginTop: 6 }}>
+          Klik ini di RDP/PC baru — otomatis membuat folder proyek, menulis semua
+          file program, dan menjalankan "npm install". Cukup sekali per instalasi.
+        </p>
+
+        {setupLog.length > 0 && (
+          <div className="log-box">
+            {setupLog.map((line, i) => (
+              <div key={i} className={line.includes("GAGAL") || line.includes("ERROR") ? "log-fail" : "log-ok"}>
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ===== JADWAL ===== */}
