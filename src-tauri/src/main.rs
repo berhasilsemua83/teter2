@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // main.rs
 // Backend Tauri: menyimpan config + mengatur Windows Task Scheduler
 // lewat command line "schtasks.exe" (bawaan Windows, tidak perlu library
@@ -44,6 +45,10 @@ struct AppConfig {
     node_exe_path: String,
     project_folder: String,
     schedule: ScheduleConfig,
+    // BARU: pengaturan gaya bahasa balasan AI
+    ai_style_preset: String,
+    ai_max_sentences: u32,
+    ai_custom_instruction: String,
 }
 
 fn config_file_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -78,9 +83,66 @@ fn write_config_to_disk(app: &tauri::AppHandle, config: &AppConfig) -> Result<()
     fs::write(&path, content).map_err(|e| format!("Gagal menyimpan config: {e}"))
 }
 
+// Menulis ulang file .env di folder proyek berdasarkan config yang tersimpan,
+// supaya script Node.js (thread-poster.js dkk) selalu pakai kredensial terbaru
+// tanpa perlu diedit manual.
+fn sync_env_file(config: &AppConfig) -> Result<(), String> {
+    if config.project_folder.trim().is_empty() {
+        return Ok(()); // belum diisi, lewati saja (bukan error fatal)
+    }
+
+    let gemini_keys_joined = config.gemini_api_keys.join(",");
+
+    let content = format!(
+        "THREADS_USER_ID={}\nTHREADS_ACCESS_TOKEN={}\nCLOUDINARY_CLOUD_NAME={}\nCLOUDINARY_API_KEY={}\nCLOUDINARY_API_SECRET={}\nGEMINI_API_KEYS={}\n",
+        config.threads_user_id,
+        config.threads_access_token,
+        config.cloudinary.cloud_name,
+        config.cloudinary.api_key,
+        config.cloudinary.api_secret,
+        gemini_keys_joined,
+    );
+
+    let env_path = format!("{}\\.env", config.project_folder.trim_end_matches('\\'));
+    fs::write(&env_path, content).map_err(|e| format!("Gagal menulis .env: {e}"))
+}
+
+// Menulis ulang ai-style.json di folder proyek, dibaca oleh comment-responder.js
+fn sync_ai_style_file(config: &AppConfig) -> Result<(), String> {
+    if config.project_folder.trim().is_empty() {
+        return Ok(());
+    }
+
+    #[derive(Serialize)]
+    struct AiStyleFile {
+        style_preset: String,
+        max_sentences: u32,
+        custom_instruction: String,
+    }
+
+    let style = AiStyleFile {
+        style_preset: if config.ai_style_preset.is_empty() {
+            "ramah_sopan".to_string()
+        } else {
+            config.ai_style_preset.clone()
+        },
+        max_sentences: if config.ai_max_sentences == 0 { 2 } else { config.ai_max_sentences },
+        custom_instruction: config.ai_custom_instruction.clone(),
+    };
+
+    let content = serde_json::to_string_pretty(&style)
+        .map_err(|e| format!("Gagal membuat ai-style.json: {e}"))?;
+
+    let path = format!("{}\\ai-style.json", config.project_folder.trim_end_matches('\\'));
+    fs::write(&path, content).map_err(|e| format!("Gagal menulis ai-style.json: {e}"))
+}
+
 #[tauri::command]
 fn save_config(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
-    write_config_to_disk(&app, &config)
+    write_config_to_disk(&app, &config)?;
+    sync_env_file(&config)?;
+    sync_ai_style_file(&config)?;
+    Ok(())
 }
 
 // ====================================================
@@ -126,6 +188,8 @@ fn build_tr_value(node_exe: &str, script_path: &str) -> String {
 #[tauri::command]
 fn apply_schedule(app: tauri::AppHandle, config: AppConfig) -> Result<Vec<String>, String> {
     write_config_to_disk(&app, &config)?;
+    sync_env_file(&config)?;
+    sync_ai_style_file(&config)?;
 
     if config.node_exe_path.trim().is_empty() {
         return Err("Path node.exe belum diisi.".into());
