@@ -193,8 +193,22 @@ export default function App() {
   if (loading) return <div className="container">Memuat pengaturan...</div>;
 
   return (
-    <div className="container">
-      <h1>Threads Automator</h1>
+        <div className="container">
+      <div className="header-row">
+        <h1>Threads Automator</h1>
+        <div className="status-indicator">
+          <span
+            className={`status-dot ${
+              config.threads_access_token && config.node_exe_path && config.project_folder
+                ? "active"
+                : ""
+            }`}
+          />
+          {config.threads_access_token && config.node_exe_path && config.project_folder
+            ? "Siap Jalan"
+            : "Belum Lengkap"}
+        </div>
+      </div>
       <p className="subtitle">Pengaturan kredensial, perilaku sistem &amp; jadwal</p>
 
       {/* ===== THREADS ===== */}
